@@ -1,0 +1,6 @@
+/vendor
+/.idea
+/log
+/tmp
+constants.php
+composer.lock
