@@ -49,15 +49,16 @@ final class Bot
 	}
 
 	/**
-	 * @param string $input
+	 * @param array $request
 	 * @throws JsonException
+	 * @throws CurlException
+	 * @throws FacebookMessengerException
 	 */
-	public function parseInput(string $input){
-		$request = Json::decode($input, Json::FORCE_ARRAY);
-
-		if ((array_key_exists('entry', $request))and(array_key_exists('object', $request))){
-			if ($this->validateInputMessage($request)){
-				foreach ($request['entry'] as $entry){
+	public function parseInput(array $request)
+	{
+		if ((array_key_exists('entry', $request)) and (array_key_exists('object', $request))) {
+			if ($this->validateInput($request, self::createMessageConstraint($this->botID))) {
+				foreach ($request['entry'] as $entry) {
 					$request = ArrayHash::from($entry['messaging'][0]);
 					$this->handleQuery($request->message->text, $request->sender->id);
 				}
