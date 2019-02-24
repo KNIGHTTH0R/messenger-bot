@@ -2,10 +2,6 @@
 
 namespace Irkalla\Messaging;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Pool;
-use GuzzleHttp\Promise\PromiseInterface;
-use GuzzleHttp\Psr7\Response;
 use Nette\Utils\ArrayHash;
 use Nette\Utils\Json;
 use Nette\Utils\JsonException;
@@ -66,30 +62,26 @@ final class Bot
 		}
 
 		if (array_key_exists('notification', $request)) {
-			if ($this->validateInputNotification($request)){
+			if ($this->validateInput($request, self::createNotificationConstraint($this->botID))) {
 				$request = ArrayHash::from($request['notification']);
-				$message = self::createMessageAttachment(
+				$attachment = self::createMessageAttachment(
 					$request->title,
 					$request->text,
 					$request->url,
-					$request->refer
+					isset($request->refer) ? $request->refer : NULL
 				);
 
-//				foreach ($request->recipients as $recipient){
-//					$this->sendMessage($recipient, $message);
-//				}
+				$exceptions = [];
 
-				$requests = function($recipients) use ($message) {
-					foreach($recipients as $recipient) {
-						yield $recipient => function() use ($recipient, $message) {
-							return $this->sendMessage($recipient, $message);
-						};
+				foreach ($request->recipients as $recipient) {
+					try {
+						$this->sendMessage($recipient, ['attachment' => $attachment]);
+					} catch (\Exception $exception) {
+						$exceptions[] = $exception;
 					}
-				};
+				}
 
-				$pool = new Pool($this->client, $requests($request->recipients));
-				$promise = $pool->promise();
-				$promise->wait();
+				foreach ($exceptions as $exception) throw $exception;
 			}
 		}
 	}
@@ -121,17 +113,31 @@ final class Bot
 
 	/**
 	 * @param array $input
+	 * @param Assert\Collection $constraint
 	 * @return bool
 	 */
-	private function validateInputMessage(array $input){
-		$constraint = new Assert\Collection([
+	private function validateInput(array $input, Assert\Collection $constraint)
+	{
+		$validator = Validation::createValidator();
+		$violations = $validator->validate($input, $constraint);
+
+		return !boolval(count($violations));
+	}
+
+	/**
+	 * @param string $botID
+	 * @return Assert\Collection
+	 */
+	private static function createMessageConstraint(string $botID)
+	{
+		return new Assert\Collection([
 			'object' => new Assert\EqualTo('page'),
-			'entry' =>  new Assert\Required([
+			'entry' => new Assert\Required([
 				new Assert\Type('array'),
 				new Assert\Count(['min' => 1]),
 				new Assert\All([
 					new Assert\Collection([
-						'id' =>  new Assert\Type('string'),
+						'id' => new Assert\Type('string'),
 						'time' => new Assert\Type('integer'),
 						'messaging' => new Assert\Required([
 							new Assert\Type('array'),
@@ -140,13 +146,13 @@ final class Bot
 								new Assert\Collection([
 									'message' => new Assert\Collection([
 										'mid' => new Assert\Type('string'),
-										'seq' =>  new Assert\Type('integer'),
-										'text' =>  new Assert\Type('string'),
+										'seq' => new Assert\Type('integer'),
+										'text' => new Assert\Type('string'),
 									]),
 									'recipient' => new Assert\Collection([
-										'id' => new Assert\EqualTo($this->botID)
+										'id' => new Assert\EqualTo($botID)
 									]),
-									'sender'  => new Assert\Collection([
+									'sender' => new Assert\Collection([
 										'id' => new Assert\Type('string')
 									]),
 									'timestamp' => new Assert\Type('integer')
@@ -157,22 +163,18 @@ final class Bot
 				]),
 			]),
 		]);
-
-		$validator = Validation::createValidator();
-		$violations = $validator->validate($input, $constraint);
-
-		return !boolval(count($violations));
 	}
 
 	/**
-	 * @param array $input
-	 * @return bool
+	 * @param string $botID
+	 * @return Assert\Collection
 	 */
-	private function validateInputNotification(array $input){
-		$constraint = new Assert\Collection([
-			'notification' =>  new Assert\Collection([
-				'botID' => new Assert\EqualTo($this->botID),
-				'title' =>  new Assert\Type('string'),
+	private static function createNotificationConstraint($botID)
+	{
+		return new Assert\Collection([
+			'notification' => new Assert\Collection([
+				'botID' => new Assert\EqualTo($botID),
+				'title' => new Assert\Type('string'),
 				'text' => new Assert\Type('string'),
 				'url' => new Assert\Url(),
 				'recipients' => new Assert\Required([
@@ -187,37 +189,33 @@ final class Bot
 				])
 			]),
 		]);
-
-		$validator = Validation::createValidator();
-		$violations = $validator->validate($input, $constraint);
-
-		return !boolval(count($violations));
 	}
 
 	/**
 	 * @param string $message
 	 * @param string $senderId
-	 * @return Response
+	 * @return array
+	 * @throws JsonException
+	 * @throws CurlException
+	 * @throws FacebookMessengerException
 	 */
-	public function handleQuery(string $message, string $senderId)
+	private function handleQuery(string $message, string $senderId)
 	{
 		$message = Strings::lower($message);
 		switch ($message) {
 			case 'who':
-				$text = (string) $senderId;
+				$text = (string)$senderId;
 				break;
 			case 'help':
-				$text = '"who" - print print your ID' . "\n" . '"help" - print this message'; 
+				$text = '"who" - print print your ID' . "\n" . '"help" - print this message';
 				break;
 			default:
-				$text = 'Dont know what to do yet. Send "help" message to see possible commands.';  
+				$text = 'Dont know what to do yet. Send "help" message to see possible commands.';
 				break;
 		}
 
-		$promise = $this->sendMessage($senderId, ['text' => $text]);
-		return $promise->wait();
+		return $this->sendMessage($senderId, ['text' => $text]);
 	}
-
 
 	/**
 	 * @param string $title
@@ -226,35 +224,40 @@ final class Bot
 	 * @param string|NULL $buttonUrl
 	 * @return array
 	 */
-	private static function createMessageAttachment(string $title, string $text, string $url, string $buttonUrl = NULL): array
+	private static function createMessageAttachment(string $title, string $text, string $url, string $buttonUrl = NULL)
 	{
-		return [
+		$attachment = [
 			'type' => 'template',
 			'payload' => [
 				'template_type' => 'generic',
 				'elements' => [
-			        'title' => $title,
-		            'image_url' => 'https://messenger.vzs-jablonec.cz/img/message.png',
-		            'subtitle' => $text,
-		            'default_action' => [
-						'type' => 'web_url',
-						'url' => $url,
-						'webview_height_ratio' => 'tall',
-		            ],
-		            'buttons' => $buttonUrl ? [self::createMessageButton($buttonUrl)] : NULL,
+					[
+						'title' => $title,
+						'image_url' => 'https://messenger.vzs-jablonec.eu/img/message.png',
+						'subtitle' => $text,
+						'default_action' => [
+							'type' => 'web_url',
+							'url' => $url,
+							'webview_height_ratio' => 'tall',
+						],
+					],
 				],
 			],
 		];
+
+		if ($buttonUrl) $attachment['payload']['elements'][0]['buttons'] = self::createMessageButton($buttonUrl);
+
+		return $attachment;
 	}
 
 	/**
 	 * @param string $url
 	 * @return array
 	 */
-	private static function createMessageButton(string $url): array
+	private static function createMessageButton(string $url)
 	{
 		return [
-	        'type' => 'web_url',
+			'type' => 'web_url',
 			'url' => $url,
 			'title' => 'Přejít',
 		];
