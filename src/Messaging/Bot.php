@@ -226,6 +226,9 @@ final class Bot
 	 */
 	private static function createMessageAttachment(string $title, string $text, string $url, string $buttonUrl = NULL)
 	{
+		$buttons[] = self::createMessageButton($url);
+		if ($buttonUrl) $buttons[] = self::createMessageButton($buttonUrl, 'Přejít');
+
 		$attachment = [
 			'type' => 'template',
 			'payload' => [
@@ -240,26 +243,26 @@ final class Bot
 							'url' => $url,
 							'webview_height_ratio' => 'tall',
 						],
+						'buttons' => $buttons,
 					],
 				],
 			],
 		];
-
-		if ($buttonUrl) $attachment['payload']['elements'][0]['buttons'] = self::createMessageButton($buttonUrl);
 
 		return $attachment;
 	}
 
 	/**
 	 * @param string $url
+	 * @param string $title
 	 * @return array
 	 */
-	private static function createMessageButton(string $url)
+	private static function createMessageButton(string $url, string $title = 'Otevřít')
 	{
 		return [
 			'type' => 'web_url',
 			'url' => $url,
-			'title' => 'Přejít',
+			'title' => $title,
 		];
 	}
 }
