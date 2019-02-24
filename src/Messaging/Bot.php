@@ -20,21 +20,17 @@ use Tracy\Debugger;
  */
 final class Bot
 {
+	const FACEBOOK_URL = 'https://graph.facebook.com/v3.2/me/messages';
 
 	/**
-	 * @var Client
+	 * @var int
 	 */
-	private $client;
+	private $curl;
 
 	/**
 	 * @var string
 	 */
 	private $botID;
-
-	/**
-	 * @var string
-	 */
-	private $accessToken;
 
 	/**
 	 * Bot constructor.
@@ -43,12 +39,12 @@ final class Bot
 	 */
 	public function __construct(string $accessToken, string $botID)
 	{
-		$this->client = new Client([
-			'base_uri' => 'https://graph.facebook.com/v3.2/me/',
-			//'query' => ['access_token' => $accessToken]
-		]);
+		$curl = curl_init(self::FACEBOOK_URL . '?access_token=' . $accessToken);
+		curl_setopt($curl, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+		curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($curl, CURLOPT_POST, TRUE);
 
-		$this->accessToken = $accessToken;
+		$this->curl = $curl;
 		$this->botID = $botID;
 	}
 
@@ -100,21 +96,26 @@ final class Bot
 	/**
 	 * @param string $recipientId
 	 * @param array $message
-	 * @return PromiseInterface
+	 * @return array
+	 * @throws JsonException
+	 * @throws CurlException
+	 * @throws FacebookMessengerException
 	 */
 	private function sendMessage(string $recipientId, array $message)
 	{
-		$promise = $this->client->requestAsync('POST','messages', [
-			'json' => [
-				'recipient' => ['id' => $recipientId],
-				'message' => $message,
-			],
-			'query' => [
-				'access_token' => $this->accessToken,
-			]
-		]);
+		curl_setopt($this->curl, CURLOPT_POSTFIELDS, Json::encode([
+			'recipient' => ['id' => $recipientId],
+			'message' => $message,
+		]));
 
-		return $promise;
+		$result = curl_exec($this->curl);
+
+		if ($result === FALSE) throw new CurlException($this->curl);
+
+		$result = Json::decode($result, Json::FORCE_ARRAY);
+		if (array_key_exists('error', $result)) throw new FacebookMessengerException($result);
+
+		return $result;
 	}
 
 	/**
