@@ -9,13 +9,10 @@ use Tracy\Debugger;
 
 Debugger::enable(Debugger::DETECT, __DIR__ . '/log');
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-	if ((array_key_exists('hub_challenge', $_GET))and(array_key_exists('hub_verify_token', $_GET))) {
-		$challenge = $_GET['hub_challenge'];
-		$hub_verify_token = $_GET['hub_verify_token'];
-
-		if ($hub_verify_token === VERIFY_TOKEN) echo $challenge;
-	}
+if (($_SERVER['REQUEST_METHOD'] === 'GET')
+	and ((array_key_exists('hub_challenge', $_GET))and(array_key_exists('hub_verify_token', $_GET)))
+	and ($_GET['hub_verify_token'] === VERIFY_TOKEN)) {
+	echo $_GET['hub_challenge'];
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
